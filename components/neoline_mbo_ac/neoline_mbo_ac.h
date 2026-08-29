@@ -12,8 +12,9 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
   void setup() override {
     this->target_temperature = 22.0;
     this->mode = climate::CLIMATE_MODE_COOL;
-    this->fan_mode = climate::CLIMATE_FAN_AUTO; // ИСПРАВЛЕНО синтаксис
+    this->fan_mode = climate::CLIMATE_FAN_AUTO;
     this->swing_mode = climate::CLIMATE_SWING_OFF;
+    this->current_temperature = NAN;
   }
 
   void loop() override {
@@ -31,7 +32,7 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
       this->rx_buf_.clear();
     }
 
-    // Автоматическая отправка пинга каждые 1500 мс [0x0.1.1]
+    // Автоматический пинг каждые 1500 мс — поддерживает двухстороннюю связь [0x0.1.1, 0x0.1.7]
     if (millis() - this->last_ping_time_ > 1500) {
       uint8_t ping_packet[] = {0x55, 0xAA, 0x00, 0x08, 0x00, 0x00, 0x07};
       this->write_array(ping_packet, 7);
@@ -44,22 +45,22 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
   uint32_t last_rx_time_{0};
   uint32_t last_ping_time_{0};
 
-  // Настройки возможностей пульта для Home Assistant
   climate::ClimateTraits traits() override {
     auto traits = climate::ClimateTraits();
-    // ИСПРАВЛЕНО: Удалены несуществующие set_supports методы
     traits.set_visual_min_temperature(16.0);
     traits.set_visual_max_temperature(30.0);
     traits.set_visual_temperature_step(1.0);
     
+    // Объявляем ровно те режимы, которые мы вывели в вашей таблице [0x0.1.6]
     traits.set_supported_modes({
       climate::CLIMATE_MODE_OFF,
       climate::CLIMATE_MODE_COOL,
       climate::CLIMATE_MODE_HEAT,
-      climate::CLIMATE_MODE_AUTO
+      climate::CLIMATE_MODE_AUTO,
+      climate::CLIMATE_MODE_DRY,   // Осушение [0x0.1.6]
+      climate::CLIMATE_MODE_FAN_ONLY // Вентиляция [0x0.1.6]
     });
     
-    // ИСПРАВЛЕНО синтаксис перечислений вентилятора
     traits.set_supported_fan_modes({
       climate::CLIMATE_FAN_AUTO,
       climate::CLIMATE_FAN_LOW,
@@ -75,70 +76,99 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
     return traits;
   }
 
-  // Перехват кликов пользователя из интерфейса Home Assistant
+  // ОБРАБОТЧИК КЛИКОВ: Выстреливает строго дискретные пакеты из вашей таблицы! [0x0.1.6]
   void control(const climate::ClimateCall &call) override {
+    
+    // 1. Изменение режима работы (Строго 12-байтовые пакеты из таблицы) [0x0.1.6]
     if (call.get_mode().has_value()) {
-      this->mode = *call.get_mode();
-    }
-    if (call.get_target_temperature().has_value()) {
-      this->target_temperature = *call.get_target_temperature();
-    }
-    if (call.get_fan_mode().has_value()) {
-      this->fan_mode = *call.get_fan_mode();
-    }
-    if (call.get_swing_mode().has_value()) {
-      this->swing_mode = *call.get_swing_mode();
+      auto new_mode = *call.get_mode();
+      this->mode = new_mode;
+      
+      if (new_mode == climate::CLIMATE_MODE_OFF) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x01, 0x01, 0x00, 0x01, 0x00, 0x0D};
+        this->write_array(p, 12);
+      }
+      else if (new_mode == climate::CLIMATE_MODE_COOL) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x04, 0x04, 0x00, 0x01, 0x00, 0x13};
+        this->write_array(p, 12);
+      }
+      else if (new_mode == climate::CLIMATE_MODE_HEAT) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x04, 0x04, 0x00, 0x01, 0x01, 0x14};
+        this->write_array(p, 12);
+      }
+      else if (new_mode == climate::CLIMATE_MODE_AUTO) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x04, 0x04, 0x00, 0x01, 0x04, 0x17};
+        this->write_array(p, 12);
+      }
+      else if (new_mode == climate::CLIMATE_MODE_DRY) { // Осушение [0x0.1.6]
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x04, 0x04, 0x00, 0x01, 0x02, 0x15};
+        this->write_array(p, 12);
+      }
+      else if (new_mode == climate::CLIMATE_MODE_FAN_ONLY) { // Вентиляция [0x0.1.6]
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x04, 0x04, 0x00, 0x01, 0x03, 0x16};
+        this->write_array(p, 12);
+      }
     }
 
-    this->send_state_to_ac_();
+    // 2. Изменение скорости вентилятора (Строго 12-байтовые пакеты из таблицы) [0x0.1.6]
+    if (call.get_fan_mode().has_value() && this->mode != climate::CLIMATE_MODE_OFF) {
+      this->fan_mode = *call.get_fan_mode();
+      
+      if (this->fan_mode == climate::CLIMATE_FAN_AUTO) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x05, 0x04, 0x00, 0x01, 0x00, 0x14};
+        this->write_array(p, 12);
+      }
+      else if (this->fan_mode == climate::CLIMATE_FAN_LOW) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x05, 0x04, 0x00, 0x01, 0x02, 0x16};
+        this->write_array(p, 12);
+      }
+      else if (this->fan_mode == climate::CLIMATE_FAN_MIDDLE) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x05, 0x04, 0x00, 0x01, 0x03, 0x17};
+        this->write_array(p, 12);
+      }
+      else if (this->fan_mode == climate::CLIMATE_FAN_HIGH) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x05, 0x04, 0x00, 0x01, 0x04, 0x18};
+        this->write_array(p, 12);
+      }
+    }
+
+    // 3. Изменение вертикальных шторок (Строго 12-байтовые пакеты из таблицы) [0x0.1.6]
+    if (call.get_swing_mode().has_value() && this->mode != climate::CLIMATE_MODE_OFF) {
+      this->swing_mode = *call.get_swing_mode();
+      
+      if (this->swing_mode == climate::CLIMATE_SWING_VERTICAL) {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x6A, 0x01, 0x00, 0x01, 0x01, 0x77};
+        this->write_array(p, 12);
+      } else {
+        uint8_t p[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x6A, 0x01, 0x00, 0x01, 0x00, 0x76};
+        this->write_array(p, 12);
+      }
+    }
+
+    // 4. Изменение температуры (Строго наш проверенный 15-байтовый пакет с авто-CRC) [0x0.1.4, 0x0.1.6]
+    if (call.get_target_temperature().has_value() && this->mode != climate::CLIMATE_MODE_OFF) {
+      this->target_temperature = *call.get_target_temperature();
+      int target = (int)this->target_temperature;
+      
+      uint8_t packet[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x08, 0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00};
+      packet[13] = (uint8_t)target;
+      
+      uint8_t crc = 0;
+      for (int i = 2; i < 14; i++) crc += packet[i];
+      packet[14] = crc - 1;
+
+      this->write_array(packet, 15);
+    }
+
     this->publish_state();
   }
 
-  // Сборка 15-байтового пакета TX для отправки в кондиционер [0x0.1.4]
-  void send_state_to_ac_() {
-    if (this->mode == climate::CLIMATE_MODE_OFF) {
-      uint8_t off_packet[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x01, 0x01, 0x00, 0x01, 0x00, 0x0D};
-      this->write_array(off_packet, 12);
-      return;
-    }
-
-    // Если режим AUTO — шлем вашу эталонную 12-байтовую сервисную команду [0x0.1.4, 0x0.1.6]
-    if (this->mode == climate::CLIMATE_MODE_AUTO) {
-      uint8_t auto_packet[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x05, 0x04, 0x04, 0x00, 0x01, 0x04, 0x17};
-      this->write_array(auto_packet, 12);
-      return;
-    }
-
-    // Для ручных режимов собираем честный 15-байтовый параметрический пакет [0x0.1.4]
-    uint8_t packet[] = {0x55, 0xAA, 0x00, 0x06, 0x00, 0x08, 0x02, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00};
-    
-    // Записываем градусы [0x0.1.4]
-    packet[13] = (uint8_t)this->target_temperature;
-
-    // Режимы (2 - Cool, 4 - Heat по вашей таблице) [0x0.1.6]
-    if (this->mode == climate::CLIMATE_MODE_COOL) packet[6] = 0x02;
-    if (this->mode == climate::CLIMATE_MODE_HEAT) packet[6] = 0x04;
-
-    // Скорость вентилятора (ИСПРАВЛЕНО синтаксис) [0x0.1.6]
-    if (this->fan_mode == climate::CLIMATE_FAN_LOW) packet[7] = 0x02;
-    if (this->fan_mode == climate::CLIMATE_FAN_AUTO) packet[7] = 0x00;
-    if (this->fan_mode == climate::CLIMATE_FAN_MIDDLE) packet[7] = 0x03;
-    if (this->fan_mode == climate::CLIMATE_FAN_HIGH) packet[7] = 0x04;
-
-    // Расчет CRC с поправкой -1 [0x0.1.4]
-    uint8_t crc = 0;
-    for (int i = 2; i < 14; i++) crc += packet[i];
-    packet[14] = crc - 1;
-
-    this->write_array(packet, 15);
-  }
-
-  // Разбор ответов шины RX [0x0.1.7]
+  // ПАРСЕР RX: Читает ответы кондиционера и двигает ползунки/режимы в HA в реальном времени! [0x0.1.7]
   void parse_packet_() {
-    // 1. Стандартные 12-байтовые ответы [0x0.1.7]
+    // Разбор 12-байтовых статусных ответов [0x0.1.7]
     if (this->rx_buf_.size() == 12 && this->rx_buf_[0] == 0x55 && this->rx_buf_[1] == 0xAA && this->rx_buf_[2] == 0x03) {
-      uint8_t reg = this->rx_buf_[6];
-      uint8_t status = this->rx_buf_[10];
+      uint8_t reg = this->rx_buf_[6];       
+      uint8_t status = this->rx_buf_[10];   
 
       if (reg == 0x01) {
         if (status == 0x00) this->mode = climate::CLIMATE_MODE_OFF;
@@ -148,21 +178,23 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
       }
       else if (reg == 0x04) {
         if (status == 0x00) this->mode = climate::CLIMATE_MODE_COOL;
-        if (status == 0x01) this->mode = climate::CLIMATE_MODE_HEAT;
-        if (status == 0x04) this->mode = climate::CLIMATE_MODE_AUTO;
+        else if (status == 0x01) this->mode = climate::CLIMATE_MODE_HEAT;
+        else if (status == 0x04) this->mode = climate::CLIMATE_MODE_AUTO;
+        else if (status == 0x02) this->mode = climate::CLIMATE_MODE_DRY;
+        else if (status == 0x03) this->mode = climate::CLIMATE_MODE_FAN_ONLY;
       }
-      else if (reg == 0x05) { // ИСПРАВЛЕНО синтаксис
+      else if (reg == 0x05) {
         if (status == 0x00) this->fan_mode = climate::CLIMATE_FAN_AUTO;
-        if (status == 0x02) this->fan_mode = climate::CLIMATE_FAN_LOW;
-        if (status == 0x03) this->fan_mode = climate::CLIMATE_FAN_MIDDLE;
-        if (status == 0x04) this->fan_mode = climate::CLIMATE_FAN_HIGH;
+        else if (status == 0x02) this->fan_mode = climate::CLIMATE_FAN_LOW;
+        else if (status == 0x03) this->fan_mode = climate::CLIMATE_FAN_MIDDLE;
+        else if (status == 0x04) this->fan_mode = climate::CLIMATE_FAN_HIGH;
       }
       this->publish_state();
     }
 
-    // 2. 15-байтовый пакет датчика комнаты [0x0.1.7]
+    // Разбор 15-байтового ответа — вытаскиваем чистые комнатные градусы [0x0.1.7]
     if (this->rx_buf_.size() == 15 && this->rx_buf_[0] == 0x55 && this->rx_buf_[1] == 0xAA && this->rx_buf_[2] == 0x03 && this->rx_buf_[5] == 0x08) {
-      uint8_t room_temp = this->rx_buf_[13]; // 14-й байт — чистый HEX воздуха в комнате [0x0.1.7]
+      uint8_t room_temp = this->rx_buf_[13]; // 14-й байт (индекс 13) [0x0.1.7]
       if (room_temp >= 10 && room_temp <= 40) {
         this->current_temperature = (float)room_temp;
         this->publish_state();
