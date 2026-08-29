@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import climate, uart
+from esphome.components import climate, uart, switch, select
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ["uart"]
@@ -10,7 +10,9 @@ NeolineMBOACClimate = neoline_mbo_ac_ns.class_(
     "NeolineMBOACClimate", climate.Climate, cg.Component, uart.UARTDevice
 )
 
-# ИСПРАВЛЕНО: В новых версиях ESPHome схема валидации пишется как climate.climate_schema (в нижнем регистре)
+# Пропишем прокси-классы для вывода тумблеров в yaml
+NeolineMBOACSwitch = neoline_mbo_ac_ns.class_("NeolineMBOACSwitch", switch.Switch)
+
 CONFIG_SCHEMA = climate.climate_schema(NeolineMBOACClimate).extend(
     uart.UART_DEVICE_SCHEMA
 )
