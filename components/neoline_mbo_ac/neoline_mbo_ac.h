@@ -12,7 +12,7 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
   void setup() override {
     this->target_temperature = 22.0;
     this->mode = climate::CLIMATE_MODE_COOL;
-    this->fan_mode = climate::CLIMATE_FAN_MODE_AUTO;
+    this->fan_mode = climate::CLIMATE_FAN_AUTO; // ИСПРАВЛЕНО синтаксис
     this->swing_mode = climate::CLIMATE_SWING_OFF;
   }
 
@@ -47,8 +47,7 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
   // Настройки возможностей пульта для Home Assistant
   climate::ClimateTraits traits() override {
     auto traits = climate::ClimateTraits();
-    traits.set_supports_current_temperature(true);
-    traits.set_supports_target_temperature(true);
+    // ИСПРАВЛЕНО: Удалены несуществующие set_supports методы
     traits.set_visual_min_temperature(16.0);
     traits.set_visual_max_temperature(30.0);
     traits.set_visual_temperature_step(1.0);
@@ -60,11 +59,12 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
       climate::CLIMATE_MODE_AUTO
     });
     
+    // ИСПРАВЛЕНО синтаксис перечислений вентилятора
     traits.set_supported_fan_modes({
-      climate::CLIMATE_FAN_MODE_AUTO,
-      climate::CLIMATE_FAN_MODE_LOW,
-      climate::CLIMATE_FAN_MODE_MIDDLE,
-      climate::CLIMATE_FAN_MODE_HIGH
+      climate::CLIMATE_FAN_AUTO,
+      climate::CLIMATE_FAN_LOW,
+      climate::CLIMATE_FAN_MIDDLE,
+      climate::CLIMATE_FAN_HIGH
     });
     
     traits.set_supported_swing_modes({
@@ -119,18 +119,11 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
     if (this->mode == climate::CLIMATE_MODE_COOL) packet[6] = 0x02;
     if (this->mode == climate::CLIMATE_MODE_HEAT) packet[6] = 0x04;
 
-    // Скорость вентилятора [0x0.1.6]
-    if (this->fan_mode == climate::CLIMATE_FAN_MODE_LOW) packet[7] = 0x02;
-    if (this->fan_mode == climate::CLIMATE_FAN_MODE_AUTO) packet[7] = 0x00;
-    if (this->fan_mode == climate::CLIMATE_FAN_MODE_MIDDLE) packet[7] = 0x03;
-    if (this->fan_mode == climate::CLIMATE_FAN_MODE_HIGH) packet[7] = 0x04;
-
-    // Вертикальный свинг
-    if (this->swing_mode == climate::CLIMATE_SWING_VERTICAL) {
-      // Для шторок по вашей логике лучше отправить отдельный импульс, 
-      // но в рамках Climate-модели взведем флаг в общем пакете, если плата это переваривает.
-      // На всякий случай оставляем базовую маску MBO.
-    }
+    // Скорость вентилятора (ИСПРАВЛЕНО синтаксис) [0x0.1.6]
+    if (this->fan_mode == climate::CLIMATE_FAN_LOW) packet[7] = 0x02;
+    if (this->fan_mode == climate::CLIMATE_FAN_AUTO) packet[7] = 0x00;
+    if (this->fan_mode == climate::CLIMATE_FAN_MIDDLE) packet[7] = 0x03;
+    if (this->fan_mode == climate::CLIMATE_FAN_HIGH) packet[7] = 0x04;
 
     // Расчет CRC с поправкой -1 [0x0.1.4]
     uint8_t crc = 0;
@@ -158,11 +151,11 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
         if (status == 0x01) this->mode = climate::CLIMATE_MODE_HEAT;
         if (status == 0x04) this->mode = climate::CLIMATE_MODE_AUTO;
       }
-      else if (reg == 0x05) {
-        if (status == 0x00) this->fan_mode = climate::CLIMATE_FAN_MODE_AUTO;
-        if (status == 0x02) this->fan_mode = climate::CLIMATE_FAN_MODE_LOW;
-        if (status == 0x03) this->fan_mode = climate::CLIMATE_FAN_MODE_MIDDLE;
-        if (status == 0x04) this->fan_mode = climate::CLIMATE_FAN_MODE_HIGH;
+      else if (reg == 0x05) { // ИСПРАВЛЕНО синтаксис
+        if (status == 0x00) this->fan_mode = climate::CLIMATE_FAN_AUTO;
+        if (status == 0x02) this->fan_mode = climate::CLIMATE_FAN_LOW;
+        if (status == 0x03) this->fan_mode = climate::CLIMATE_FAN_MIDDLE;
+        if (status == 0x04) this->fan_mode = climate::CLIMATE_FAN_HIGH;
       }
       this->publish_state();
     }
