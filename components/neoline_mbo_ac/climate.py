@@ -5,17 +5,15 @@ from esphome.const import CONF_ID
 
 DEPENDENCIES = ["uart"]
 
-# ВНИМАНИЕ: Проверьте нижние подчеркивания здесь!
 neoline_mbo_ac_ns = cg.esphome_ns.namespace("neoline_mbo_ac")
 NeolineMBOACClimate = neoline_mbo_ac_ns.class_(
     "NeolineMBOACClimate", climate.Climate, cg.Component, uart.UARTDevice
 )
 
-CONFIG_SCHEMA = climate.CLIMATE_SCHEMA.extend(
-    {
-        cv.GenerateID(): cv.declare_id(NeolineMBOACClimate),
-    }
-).extend(uart.UART_DEVICE_SCHEMA)
+# ИСПРАВЛЕНО: В новых версиях ESPHome схема валидации пишется как climate.climate_schema (в нижнем регистре)
+CONFIG_SCHEMA = climate.climate_schema(NeolineMBOACClimate).extend(
+    uart.UART_DEVICE_SCHEMA
+)
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
