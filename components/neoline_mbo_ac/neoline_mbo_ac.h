@@ -94,7 +94,7 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
       climate::CLIMATE_SWING_BOTH
     });
     
-    // Строку traits.set_supports_current_temperature(true); полностью удалили
+    //traits.set_supports_current_temperature(true);
     return traits;
   }
 
@@ -222,14 +222,18 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
 
     // 2. Парсинг 15-байтовых длинных пакетов температур (RX)
     if (packet.size() == 15 && packet[5] == 0x08) {
-      uint8_t sub_reg = packet[6];  
-      uint8_t val = packet[13];     
+      uint8_t sub_reg = packet[6];  // 7-й байт (индекс 6) определяет тип температуры
+      uint8_t val = packet[13];     // 14-й байт (индекс 13) содержит значение градусов
 
-      if (sub_reg == 0x03 && val >= 10 && val <= 40) {
-        this->current_temperature = (float)val;
+      if (sub_reg == 0x03) { // Комнатная температура
+        if (val >= 10 && val <= 40) {
+          this->current_temperature = (float)val;
+        }
       }
-      else if (sub_reg == 0x02 && val >= 16 && val <= 30) {
-        this->target_temperature = (float)val;
+      else if (sub_reg == 0x02) { // Целевая установленная температура
+        if (val >= 16 && val <= 30) {
+          this->target_temperature = (float)val;
+        }
       }
       this->publish_state();
     }
