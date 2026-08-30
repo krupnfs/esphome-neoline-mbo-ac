@@ -69,7 +69,7 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
   std::vector<uint8_t> rx_buf_;
   uint32_t last_ping_time_{0};
 
-  climate::ClimateTraits traits() override {
+    climate::ClimateTraits traits() override {
     auto traits = climate::ClimateTraits();
     traits.set_visual_min_temperature(16.0);
     traits.set_visual_max_temperature(30.0);
@@ -94,9 +94,10 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
       climate::CLIMATE_SWING_BOTH
     });
     
-    traits.set_supports_current_temperature(true);
+    // Строку traits.set_supports_current_temperature(true); полностью удалили
     return traits;
   }
+
 
   void control(const climate::ClimateCall &call) override {
     // 1. ПРОВЕРКА ПИТАНИЯ: Если кондиционер выключен, а пользователь меняет режим/температуру/вентилятор
