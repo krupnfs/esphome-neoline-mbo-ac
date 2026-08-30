@@ -99,11 +99,13 @@ class NeolineMBOACClimate : public climate::Climate, public Component, public ua
     
     traits.set_supported_fan_modes({
       climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW,
-      climate::CLIMATE_FAN_MIDDLE, climate::CLIMATE_FAN_HIGH
+      climate::CLIMATE_FAN_MIDDLE, climate::CLIMATE_FAN_HIGH,
+      climate::CLIMATE_FAN_DIFFUSE
     });
     
     traits.set_supported_swing_modes({
-      climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL
+      climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL,
+      climate::ClIMATE_SWING_HORIZONTAL
     });
     
     return traits;
